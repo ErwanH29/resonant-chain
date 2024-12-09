@@ -2,6 +2,7 @@
 
 # from amuse.community.rebound.interface import Rebound
 from amuse.community.ph4.interface import ph4
+from amuse.community.huayno.interface import Huayno
 from amuse.units import units, constants, nbody_system, quantities
 from amuse.lab import Particles, Particle
 from amuse.couple import bridge
@@ -88,7 +89,8 @@ class CodeWithMigration():
         self.time = tend
 
 def bring_planet_pair_in_resonance(planetary_system, inner_planet, outer_planet,
-                                   t_integration=100, n_steps=100):
+                                   t_integration=100, n_steps=100,
+                                   plot_results):
     
     star = planetary_system[planetary_system.type == "star"][0]    
     planets = planetary_system[planetary_system.type == "planet"]
@@ -100,14 +102,21 @@ def bring_planet_pair_in_resonance(planetary_system, inner_planet, outer_planet,
     # set migration timescale
     planetary_system.tau_a = -np.inf | units.yr
     planetary_system.tau_e = -np.inf | units.yr
-    outer_planet.tau_a  = -1e6 | units.yr
-    outer_planet.tau_e  = -2e5 | units.yr
+    outer_planet.tau_a  = -1e5 * Porbit
+    outer_planet.tau_e  = -2e4 * Porbit
+    #outer_planet.tau_a  = -(1e5*t_integration) | units.yr
+    #outer_planet.tau_e  = -(2e4*t_integration) | units.yr
+    #outer_planet.tau_a  = -1e5 | units.yr
+    #outer_planet.tau_e  = -2e4 | units.yr
     #planetary_system[-1].tau_a = -1e6 | units.yr
     #planetary_system.tau_e = -2e5 | units.yr
 
     converter = nbody_system.nbody_to_si(planetary_system.mass.sum(), Porbit)
     nbody = ph4(convert_nbody=converter)
+    #nbody = Huayno(convert_nbody=converter)
     nbody.particles.add_particles(planetary_system)
+    #nbody.particles.add_particles(star.as_set())
+    #nbody.particles.add_particles(planets)
 
     #setup nbody
     migration_code = CodeWithMigration(nbody, planetary_system, do_sync=True, verbose=False)
@@ -189,54 +198,55 @@ def bring_planet_pair_in_resonance(planetary_system, inner_planet, outer_planet,
         phi_b.append(p_b)
 
     #print("phi_a:", phi_a)
-    
-    phi_a = np.array(phi_a).T
-    phi_b = np.array(phi_b).T
+
+    if plot_results:
+        phi_a = np.array(phi_a).T
+        phi_b = np.array(phi_b).T
         
-    Porb = np.array(Porb).T
-    sma = np.array(sma).T
-    ecc = np.array(ecc).T
-    inc = np.array(inc).T
+        Porb = np.array(Porb).T
+        sma = np.array(sma).T
+        ecc = np.array(ecc).T
+        inc = np.array(inc).T
     
-    for ai in sma[:]:
-        plt.plot(ts.value_in(units.yr), ai, lw=3)
-    #plt.axhline(y=20.8, linestyle='-', lw=1)
-    plt.xlabel('Time[yr]')
-    plt.ylabel('a [au]')
-    plt.show()
+        for ai in sma[:]:
+            plt.plot(ts.value_in(units.yr), ai, lw=3)
+        #plt.axhline(y=20.8, linestyle='-', lw=1)
+        plt.xlabel('Time[yr]')
+        plt.ylabel('a [au]')
+        plt.show()
 
-    for Pi in Porb[:]:
-        plt.plot(ts.value_in(units.yr), Pi, lw=3)
-    #plt.axhline(y=20.8, linestyle='-', lw=1)
-    plt.xlabel('Time[yr]')
-    plt.ylabel('P [yr]')
-    plt.show()
+        for Pi in Porb[:]:
+            plt.plot(ts.value_in(units.yr), Pi, lw=3)
+        #plt.axhline(y=20.8, linestyle='-', lw=1)
+        plt.xlabel('Time[yr]')
+        plt.ylabel('P [yr]')
+        plt.show()
     
-    for ei in ecc[:]:
-        plt.plot(ts.value_in(units.yr), ei)
-    plt.xlabel('Time[yr]')
-    plt.ylabel('e')
-    plt.show()
+        for ei in ecc[:]:
+            plt.plot(ts.value_in(units.yr), ei)
+        plt.xlabel('Time[yr]')
+        plt.ylabel('e')
+        plt.show()
 
-    for ii in inc[:]:
-        plt.plot(ts.value_in(units.yr), ii)
-    plt.xlabel('Time[yr]')
-    plt.ylabel('i [deg]')
-    plt.show()
+        for ii in inc[:]:
+            plt.plot(ts.value_in(units.yr), ii)
+        plt.xlabel('Time[yr]')
+        plt.ylabel('i [deg]')
+        plt.show()
 
-    for pi in phi_a[:]:
-        plt.scatter(ts.value_in(units.yr), pi%(360))
-    for pi in phi_b[:]:
-        plt.scatter(ts.value_in(units.yr), pi%(360))
-    plt.xlabel('Time[yr]')
-    plt.ylabel('phi [deg]')
-    plt.show()
+        for pi in phi_a[:]:
+            plt.scatter(ts.value_in(units.yr), pi%(360))
+        for pi in phi_b[:]:
+            plt.scatter(ts.value_in(units.yr), pi%(360))
+        plt.xlabel('Time[yr]')
+        plt.ylabel('phi [deg]')
+        plt.show()
 
-    for pi in range(len(phi_a[:])):
-        plt.scatter(phi_a[pi]%(360), phi_b[pi]%(360))
-    plt.xlabel('phi a [deg]')
-    plt.ylabel('phi b [deg]')
-    plt.show()
+        for pi in range(len(phi_a[:])):
+            plt.scatter(phi_a[pi]%(360), phi_b[pi]%(360))
+        plt.xlabel('phi a [deg]')
+        plt.ylabel('phi b [deg]')
+        plt.show()
 
     return planetary_system
     

@@ -22,18 +22,23 @@ def semi_to_orbital_period(a, Mtot) :
 def orbital_period_to_semi(P, Mtot) :
     return ((constants.G*Mtot) * (P/(2*np.pi))**2)**(1./3.)
 
-def resonant_chain_planetary_system(bodies):
+def resonant_chain_planetary_system(bodies,
+                                    t_integration, n_steps):
 
     star = bodies[bodies.type == "star"][0]    
     planets = bodies[bodies.type == "planet"]
     for pi in range(len(planets)-1):
-        bodies = resonant_pair_planetary_system(bodies, inner_planet_id=pi)
+        bodies = resonant_pair_planetary_system(bodies, inner_planet_id=pi, t_integration, n_steps,
+                                                plot_results=False)
     return bodies
 
-def resonant_pair_planetary_system(bodies, inner_planet_id=0, outer_planet_id=1):
+def resonant_pair_planetary_system(bodies, inner_planet_id=0, outer_planet_id=1,
+                                   t_integration=100, n_steps=100,
+                                   plot_results=True):
 
     star = bodies[bodies.type == "star"][0]    
     planets = bodies[bodies.type == "planet"]
+    print(f"Number of planets is {len(planets)}")
     
     for pi in planets:
         orbital_elements = orbital_elements_from_binary(star + pi)
@@ -49,7 +54,9 @@ def resonant_pair_planetary_system(bodies, inner_planet_id=0, outer_planet_id=1)
     fraction = Fraction(Porb_a/Porb_b).limit_denominator(10)
     print(f"{P1.name}, {P2.name} F={fraction}, {fraction.numerator/fraction.denominator},  {Porb_a/Porb_b}")
     print(star.name)
-    bring_planet_pair_in_resonance(bodies, P1, P2)
+    bring_planet_pair_in_resonance(bodies, P1, P2,
+                                   t_integration, n_steps,
+                                   plot_results)
 
     return bodies
 
@@ -70,17 +77,26 @@ def new_option_parser():
     result.add_option("-F", dest="outfilename", 
                       default = "output_filename.amuse",
                       help="output infilename [%default]")
+    result.add_option("--n_steps", dest="n_steps", 
+                      default = 100, type="int",
+                      help="number of steps [%default]")
+    result.add_option("--t_integration", dest="t_integration", 
+                      default = 1000, type="float",
+                      help="integration time in units of the outer orbital period [%default]")
     return result
     
 if __name__ in ('__main__', '__plot__'):
     o, arguments  = new_option_parser().parse_args()
 
     bodies = read_set_from_file(o.infilename)
-    
+
     if o.inner_planet_id<0:
-        bodies = resonant_chain_planetary_system(bodies)
+        bodies = resonant_chain_planetary_system(bodies,
+                                                 o.t_integration, o.n_steps)
+
     else:
-        bodies = resonant_pair_planetary_system(bodies, o.inner_planet_id, o.outer_planet_id)
+        bodies = resonant_pair_planetary_system(bodies, o.inner_planet_id, o.outer_planet_id,
+                                                o.t_integration, o.n_steps)
     write_set_to_file(bodies,
                       o.outfilename,
                       overwrite_file=True,
