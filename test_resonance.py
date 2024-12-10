@@ -24,19 +24,22 @@ def orbital_period_to_semi(P, Mtot) :
 
 def test_resonance_period_ratio(bodies):
 
+    import string
+
     star = bodies[bodies.type=="star"][0]    
     planets = bodies[bodies.type=="planet"]
     Porbit = [] | units.yr
-    for pi in planets:
+    for i, pi in enumerate(planets):
         orbit = orbital_elements_from_binary(star + pi)
         print(orbit[2].in_(units.au), orbit[3])
         pi.orbital_period = semi_to_orbital_period(orbit[2], star.mass+pi.mass)
+        pi.name = string.ascii_lowercase[i]
 
     for pi in planets:
         for pj in planets:
             if pi != pj:
                 #print(pi, pj)
-                fraction = Fraction(pi.orbital_period/pj.orbital_period).limit_denominator(10)
+                fraction = Fraction(pi.orbital_period/pj.orbital_period).limit_denominator(12)
                 print(f"{pi.name}, {pj.name} F={fraction}, {fraction.numerator/fraction.denominator} "
                       f"{pi.orbital_period/pj.orbital_period}")
 

@@ -89,8 +89,9 @@ class CodeWithMigration():
         self.time = tend
 
 def bring_planet_pair_in_resonance(planetary_system, inner_planet, outer_planet,
+                                   tau_a_factor = -1.e5,
                                    t_integration=100, n_steps=100,
-                                   plot_results):
+                                   plot_results=False):
     
     star = planetary_system[planetary_system.type == "star"][0]    
     planets = planetary_system[planetary_system.type == "planet"]
@@ -102,8 +103,8 @@ def bring_planet_pair_in_resonance(planetary_system, inner_planet, outer_planet,
     # set migration timescale
     planetary_system.tau_a = -np.inf | units.yr
     planetary_system.tau_e = -np.inf | units.yr
-    outer_planet.tau_a  = -1e5 * Porbit
-    outer_planet.tau_e  = -2e4 * Porbit
+    outer_planet.tau_a  = tau_a_factor * Porbit
+    outer_planet.tau_e  = outer_planet.tau_a/500
     #outer_planet.tau_a  = -(1e5*t_integration) | units.yr
     #outer_planet.tau_e  = -(2e4*t_integration) | units.yr
     #outer_planet.tau_a  = -1e5 | units.yr
@@ -250,7 +251,8 @@ def bring_planet_pair_in_resonance(planetary_system, inner_planet, outer_planet,
 
     return planetary_system
     
-def add_planet_in_resonant_chain(bodies, semimajor_axis, inclination, mplanet, Pratio=0, name="Aa"):
+def add_planet_in_resonant_chain(bodies, semimajor_axis, inclination, mplanet, Pratio=0, name="Aa",
+                                 tau_a_factor=-1e5):
 
     star = bodies[bodies.type == "star"][0]    
     planets = bodies[bodies.type == "planet"]
@@ -292,7 +294,7 @@ def add_planet_in_resonant_chain(bodies, semimajor_axis, inclination, mplanet, P
     bodies.move_to_center()
     #print(bodies)
 
-    bodies = bring_planet_pair_in_resonance(bodies, bodies[-2], bodies[-1])
+    bodies = bring_planet_pair_in_resonance(bodies, bodies[-2], bodies[-1], tau_a_factor=tau_a_factor)
 
     return bodies
 
@@ -315,6 +317,10 @@ def new_option_parser():
                       dest="Pratio", type="float", 
                       default = 0,
                       help="Resonant period ratio [%default]")
+    result.add_option("--tau", 
+                      dest="tau_a_factor", type="float", 
+                      default = -1e5,
+                      help="migration parameter (in terms of outer orbital period) [%default]")
     result.add_option("-m", dest="mplanet", type="float", unit=units.MEarth,
                       default = 1|units.MEarth,
                       help="mass of the planet planet [%default]")
@@ -337,7 +343,8 @@ if __name__ in ('__main__', '__plot__'):
         bodies.mass = o.Mstar
         bodies.name = o.name
 
-    bodies = add_planet_in_resonant_chain(bodies, o.semimajor_axis, o.inclination, o.mplanet, o.Pratio, o.name)
+    bodies = add_planet_in_resonant_chain(bodies, o.semimajor_axis, o.inclination, o.mplanet, o.Pratio, o.name,
+                                          o.tau_a_factor)
     write_set_to_file(bodies,
                       o.infilename,
                       overwrite_file=True,
