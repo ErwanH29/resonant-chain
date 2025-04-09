@@ -31,17 +31,18 @@ def test_resonance_period_ratio(bodies):
     Porbit = [] | units.yr
     for i, pi in enumerate(planets):
         orbit = orbital_elements_from_binary(star + pi)
-        print(orbit[2].in_(units.au), orbit[3])
         pi.orbital_period = semi_to_orbital_period(orbit[2], star.mass+pi.mass)
-        pi.name = string.ascii_lowercase[i]
+        #pi.name = string.ascii_lowercase[i]
+        print(f"Planet {pi.name} (a={orbit[2].value_in(units.au):.3f}au, e= {orbit[3]:.3f}): P= {pi.orbital_period.value_in(units.yr):.3f}year")
 
     for pi in planets:
         for pj in planets:
             if pi != pj:
                 #print(pi, pj)
-                fraction = Fraction(pi.orbital_period/pj.orbital_period).limit_denominator(12)
-                print(f"{pi.name}, {pj.name} F={fraction}, {fraction.numerator/fraction.denominator} "
-                      f"{pi.orbital_period/pj.orbital_period}")
+                fraction = Fraction(pi.orbital_period/pj.orbital_period).limit_denominator(10)
+                print(f"{pi.name}, {pj.name} F={fraction}, "
+                      f"Fraction= {fraction.numerator/fraction.denominator} "
+                      f"Period ratio= {pi.orbital_period/pj.orbital_period}")
 
 def test_resonance_by_integration(bodies, t_end, n_step):
 
@@ -72,6 +73,7 @@ def test_resonance_by_integration(bodies, t_end, n_step):
         model_time += dt
         time.append(model_time)
 
+        name = []
         P = [] | units.yr
         a = [] | units.au
         e = []
@@ -85,6 +87,7 @@ def test_resonance_by_integration(bodies, t_end, n_step):
             if outer_orbit is not None:
                 inner_orbit = outer_orbit
             outer_orbit = orbital_elements_from_binary(star + planet)
+            name.append(planet.name)
             P.append(semi_to_orbital_period(outer_orbit[2], star.mass))
             a.append(outer_orbit[2])
             e.append(outer_orbit[3])
@@ -95,7 +98,8 @@ def test_resonance_by_integration(bodies, t_end, n_step):
                 ta_b = outer_orbit[4]
                 aop_a = inner_orbit[7]
                 aop_b = outer_orbit[7]
-                phi = (ta_a+aop_a)-2*(ta_b+aop_b)
+                #phi = (ta_a+aop_a)-2*(ta_b+aop_b)
+                phi = (ta_a)-2*ta_b 
                 p_a.append(phi + aop_a)
                 p_b.append(phi + aop_b)
             
@@ -115,12 +119,15 @@ def test_resonance_by_integration(bodies, t_end, n_step):
     sma = np.array(sma).T
     ecc = np.array(ecc).T
     inc = np.array(inc).T
-    
+
+    i = 0
     for ai in sma[:]:
-        plt.plot(time.value_in(units.yr), ai, lw=3)
+        plt.plot(time.value_in(units.yr), ai, lw=3, label=name[i])
+        i+= 1
     #plt.axhline(y=20.8, linestyle='-', lw=1)
     plt.xlabel('Time[yr]')
     plt.ylabel('a [au]')
+    plt.legend()
     plt.show()
 
     for Pi in Porb[:]:
@@ -142,6 +149,10 @@ def test_resonance_by_integration(bodies, t_end, n_step):
     plt.ylabel('i [deg]')
     plt.show()
 
+    resonance = []
+    for ni in range(len(name[:-1])):
+        resonance.append(f"{name[ni]}-{name[ni+1]}")
+    
     for pi in phi_a[:]:
         plt.scatter(time.value_in(units.yr), pi%(360))
     for pi in phi_b[:]:
@@ -151,9 +162,11 @@ def test_resonance_by_integration(bodies, t_end, n_step):
     plt.show()
 
     for pi in range(len(phi_a[:])):
-        plt.scatter(phi_a[pi]%(360), phi_b[pi]%(360))
+        plt.scatter(phi_a[pi]%(360), phi_b[pi]%(360), label=resonance[pi])
     plt.xlabel('phi a [deg]')
     plt.ylabel('phi b [deg]')
+    plt.legend()
+
     plt.show()
 
 def new_option_parser():

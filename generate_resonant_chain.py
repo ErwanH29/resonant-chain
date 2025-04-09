@@ -101,10 +101,17 @@ def bring_planet_pair_in_resonance(planetary_system, inner_planet, outer_planet,
     Porbit = semi_to_orbital_period(orbital_elements[2], np.sum(orbital_elements[:2]))
 
     # set migration timescale
+    #planetary_system.tau_a = -np.inf | units.yr
+    #planetary_system.tau_e = -np.inf | units.yr
+    #outer_planet.tau_a  = tau_a_factor * Porbit
+    #outer_planet.tau_e  = outer_planet.tau_a/500
+    #planetary_system.tau_a = 0.01*tau_a_factor * Porbit
+    #planetary_system.tau_e = 0.01*outer_planet.tau_a/n_steps #500
     planetary_system.tau_a = -np.inf | units.yr
     planetary_system.tau_e = -np.inf | units.yr
     outer_planet.tau_a  = tau_a_factor * Porbit
-    outer_planet.tau_e  = outer_planet.tau_a/500
+    outer_planet.tau_e  = outer_planet.tau_a/n_steps #500
+    ######
     #outer_planet.tau_a  = -(1e5*t_integration) | units.yr
     #outer_planet.tau_e  = -(2e4*t_integration) | units.yr
     #outer_planet.tau_a  = -1e5 | units.yr
@@ -251,17 +258,22 @@ def bring_planet_pair_in_resonance(planetary_system, inner_planet, outer_planet,
 
     return planetary_system
     
-def add_planet_in_resonant_chain(bodies, semimajor_axis, inclination, mplanet, Pratio=0, name="Aa",
-                                 tau_a_factor=-1e5):
+def add_planet_in_resonant_chain(bodies, name_star, semimajor_axis,
+                                 eccentricity,
+                                 inclination, mplanet, Pratio=0, name="Aa",
+                                 tau_a_factor=-1e5,
+                                 t_integration=100,
+                                 n_steps=100):
 
     star = bodies[bodies.type == "star"][0]    
     planets = bodies[bodies.type == "planet"]
     if len(planets) == 0:
         print(f"add planet to star")
         bodies = new_binary_from_orbital_elements(star.mass,
-                                                  mplanet, semimajor_axis, 0.,
+                                                  mplanet, semimajor_axis, eccentricity,
                                                   inclination=inclination)
         bodies[0].type = "star"
+        bodies[0].name = name_star
         bodies[1].type = "planet"
         bodies[1].name = name
         #bodies.add_particle(planet)
@@ -291,10 +303,14 @@ def add_planet_in_resonant_chain(bodies, semimajor_axis, inclination, mplanet, P
 
     bodies.add_particle(second_planet[1])
     bodies[-1].type = "planet"
+    bodies[-1].name = name
     bodies.move_to_center()
     #print(bodies)
 
-    bodies = bring_planet_pair_in_resonance(bodies, bodies[-2], bodies[-1], tau_a_factor=tau_a_factor)
+    bodies = bring_planet_pair_in_resonance(bodies, bodies[-2], bodies[-1],
+                                            tau_a_factor=tau_a_factor,
+                                            t_integration=t_integration,
+                                            n_steps=n_steps)
 
     return bodies
 
@@ -310,6 +326,9 @@ def new_option_parser():
     result.add_option("-a", dest="semimajor_axis", type="float", unit=units.au,
                       default = 1|units.au,
                       help="semi-major axis of the first planet [%default]")
+    result.add_option("-e", dest="eccentricity", type="float", 
+                      default = 0.0,
+                      help="eccenticity of the first planet [%default]")
     result.add_option("-i", dest="inclination", type="float", unit=units.deg,
                       default = 1|units.deg,
                       help="semi-major axis of the first planet [%default]")
@@ -321,12 +340,23 @@ def new_option_parser():
                       dest="tau_a_factor", type="float", 
                       default = -1e5,
                       help="migration parameter (in terms of outer orbital period) [%default]")
+    result.add_option("-t", "--t_integration", 
+                      dest="t_integration", type="float", 
+                      default = 100,
+                      help="migration time scale (in terms of outer orbital period) [%default]")
+    result.add_option("--nsteps", 
+                      dest="n_steps", type="int", 
+                      default = 100,
+                      help="number of migration steps [%default]")
     result.add_option("-m", dest="mplanet", type="float", unit=units.MEarth,
                       default = 1|units.MEarth,
                       help="mass of the planet planet [%default]")
     result.add_option("--name", dest="name", 
-                      default = "star",
+                      default = "planet",
                       help="planet name [%default]")
+    result.add_option("--name_star", dest="name_star", 
+                      default = "Sun",
+                      help="stellar name [%default]")
     result.add_option("-M", dest="Mstar", type="float", unit=units.MSun,
                       default = -1|units.MSun,
                       help="mass of the star [%default]")
@@ -341,10 +371,16 @@ if __name__ in ('__main__', '__plot__'):
         bodies = Particles(1)
         bodies.type = "star"
         bodies.mass = o.Mstar
-        bodies.name = o.name
+        bodies.name = o.name_star
 
-    bodies = add_planet_in_resonant_chain(bodies, o.semimajor_axis, o.inclination, o.mplanet, o.Pratio, o.name,
-                                          o.tau_a_factor)
+    bodies = add_planet_in_resonant_chain(bodies,
+                                          o.name_star,
+                                          o.semimajor_axis,
+                                          o.eccentricity,
+                                          o.inclination, o.mplanet, o.Pratio, o.name,
+                                          o.tau_a_factor,
+                                          o.t_integration,
+                                          o.n_steps)
     write_set_to_file(bodies,
                       o.infilename,
                       overwrite_file=True,
