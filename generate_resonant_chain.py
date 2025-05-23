@@ -36,6 +36,7 @@ class CodeWithMigration():
         required_attributes = ['mass', 'x', 'y', 'z', 'vx', 'vy', 'vz', 'tau_a', 'tau_e']
         self.required_attributes = lambda p, x : x in required_attributes
         self.particles = particles
+        self.tolerance = 1e-4
         
     def kick_with_field_code(self, particles, dt):
         #!!!need a for loop for different particles?
@@ -75,7 +76,7 @@ class CodeWithMigration():
     
     def evolve_model(self, tend):
         timestep = self.timestep
-        while self.time < tend:
+        while self.time < tend * (1 - self.tolerance):
             dt = min(timestep, tend-self.time)
             codetopart = self.code.particles.new_channel_to(self.particles)
             codetopart.copy()
