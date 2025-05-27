@@ -1,46 +1,55 @@
 #!/usr/bin/env python
 
-# from amuse.community.rebound.interface import Rebound
-from amuse.community.ph4.interface import ph4
-from amuse.units import units, constants, nbody_system, quantities
-from amuse.lab import Particles, Particle
-from amuse.couple import bridge
-from amuse.ext.orbital_elements import new_binary_from_orbital_elements, orbital_elements_from_binary
 
-from tqdm import tqdm
-import numpy as np
-from amuse.io import write_set_to_file, read_set_from_file
-
-import matplotlib.pyplot as plt
 from fractions import Fraction
 
-from generate_resonant_chain import bring_planet_pair_in_resonance
+from amuse.ext.orbital_elements import orbital_elements_from_binary
+from amuse.io import write_set_to_file, read_set_from_file
 
-def semi_to_orbital_period(a, Mtot) :
-    return 2*np.pi * (a**3/(constants.G*Mtot)).sqrt()
+from generate_resonant_chain import bring_planet_pair_in_resonance, semi_to_orbital_period
 
-def orbital_period_to_semi(P, Mtot) :
-    return ((constants.G*Mtot) * (P/(2*np.pi))**2)**(1./3.)
 
-def resonant_chain_planetary_system(bodies,
-                                    tau_a_factor,
-                                    t_integration, n_steps):
-
-    star = bodies[bodies.type == "star"][0]    
+def resonant_chain_planetary_system(bodies, tau_a_factor, t_integration, n_steps, coll_check=False):
+    """
+    Create a resonant chain of planetary bodies in a system.
+    Args:
+        bodies (Particles): The set of bodies in the system.
+        tau_a_factor (float): Migration parameter in terms of outer orbital period.
+        t_integration (float): Integration time in units of the outer orbital period.
+        n_steps (int): Number of integration steps.
+        coll_check (bool): Whether to check for collisions or not.
+    Returns:
+        bodies (Particles): The updated set of bodies in the system.
+    """  
     planets = bodies[bodies.type == "planet"]
     for pi in range(len(planets)-1):
-        bodies = resonant_pair_planetary_system(bodies,
-                                                inner_planet_id=pi,
-                                                tau_a_factor=tau_a_factor,
-                                                t_integration=t_integration,
-                                                n_steps=n_steps,
-                                                plot_results=False)
+        bodies = resonant_pair_planetary_system(
+                        bodies,
+                        inner_planet_id=pi,
+                        tau_a_factor=tau_a_factor,
+                        t_integration=t_integration,
+                        n_steps=n_steps,
+                        plot_results=False,
+                        coll_check=coll_check
+                        )
     return bodies
 
-def resonant_pair_planetary_system(bodies, inner_planet_id=0, outer_planet_id=1,
-                                   tau_a_factor=-1e5,
-                                   t_integration=100, n_steps=100,
-                                   plot_results=True):
+def resonant_pair_planetary_system(bodies, inner_planet_id=0, outer_planet_id=1, tau_a_factor=-1e5,
+                                   t_integration=100, n_steps=100, plot_results=True, coll_check=False):
+    """
+    Create a resonant pair of planetary bodies in a system.
+    Args:
+        bodies (Particles): The set of bodies in the system.
+        inner_planet_id (int): Index of the inner planet.
+        outer_planet_id (int): Index of the outer planet.
+        tau_a_factor (float): Migration parameter in terms of outer orbital period.
+        t_integration (float): Integration time in units of the outer orbital period.
+        n_steps (int): Number of integration steps.
+        plot_results (bool): Whether to plot the results or not.
+        coll_check (bool): Whether to check for collisions or not.
+    Returns:
+        bodies (Particles): The updated set of bodies in the system.
+    """
 
     star = bodies[bodies.type == "star"][0]    
     planets = bodies[bodies.type == "planet"]
@@ -58,12 +67,18 @@ def resonant_pair_planetary_system(bodies, inner_planet_id=0, outer_planet_id=1,
     Porb_a = semi_to_orbital_period(P1.semimajor_axis, star.mass + P1.mass)
     Porb_b = semi_to_orbital_period(P2.semimajor_axis, star.mass + P2.mass)
     fraction = Fraction(Porb_a/Porb_b).limit_denominator(10)
-    print(f"{P1.name}, {P2.name} F={fraction}, {fraction.numerator/fraction.denominator},  {Porb_a/Porb_b}")
-    print(star.name)
-    bring_planet_pair_in_resonance(bodies, P1, P2,
-                                   tau_a_factor,
-                                   t_integration, n_steps,
-                                   plot_results)
+    print(f"{P1.name}, {P2.name} Orbital Period Ratio={fraction}, {fraction.numerator/fraction.denominator},  {Porb_a/Porb_b}")
+    
+    bring_planet_pair_in_resonance(
+        planetary_system=bodies, 
+        inner_planet=P1, 
+        outer_planet=P2,
+        tau_a_factor=tau_a_factor,
+        t_integration=t_integration, 
+        n_steps=n_steps,
+        plot_results=plot_results,
+        coll_check=coll_check
+    )
 
     return bodies
 
@@ -104,14 +119,20 @@ if __name__ in ('__main__', '__plot__'):
     if o.inner_planet_id<0:
         bodies = resonant_chain_planetary_system(bodies,
                                                  o.tau_a_factor,
-                                                 o.t_integration, o.n_steps)
+                                                 o.t_integration, 
+                                                 o.n_steps)
 
     else:
-        bodies = resonant_pair_planetary_system(bodies, o.inner_planet_id, o.outer_planet_id,
+        bodies = resonant_pair_planetary_system(bodies, 
+                                                o.inner_planet_id, 
+                                                o.outer_planet_id,
                                                 o.tau_a_factor,
-                                                o.t_integration, o.n_steps)
-    write_set_to_file(bodies,
-                      o.outfilename,
-                      overwrite_file=True,
-                      append_to_file=False,
-                      close_file=True)
+                                                o.t_integration, 
+                                                o.n_steps)
+    write_set_to_file(
+        bodies,
+        o.outfilename,
+        overwrite_file=True,
+        append_to_file=False,
+        close_file=True
+    )
