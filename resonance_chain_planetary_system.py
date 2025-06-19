@@ -1,97 +1,84 @@
 #!/usr/bin/env python
 
 
-from fractions import Fraction
+import glob
+import numpy as np
 
-from amuse.ext.orbital_elements import orbital_elements_from_binary
+from amuse.ext.orbital_elements import orbital_elements
 from amuse.io import write_set_to_file, read_set_from_file
+from amuse.lab import Particles
+from amuse.units import units, constants
 
-from generate_resonant_chain import bring_planet_pair_in_resonance, semi_to_orbital_period
+from generate_resonant_chain import bring_planet_pair_in_resonance
+from generate_resonant_chain import semi_to_orbital_period
 
 
-def resonant_chain_planetary_system(bodies, tau_a_factor, t_integration, n_steps, coll_check=False):
+def resonant_chain_planetary_system(bodies, tau_a_factor, t_evol, n_steps):
     """
-    Create a resonant chain of planetary bodies in a system.
+    Iterate over adjacent planets and shake them into resonance.
     Args:
-        bodies (Particles): The set of bodies in the system.
-        tau_a_factor (float): Migration parameter in terms of outer orbital period.
-        t_integration (float): Integration time in units of the outer orbital period.
-        n_steps (int): Number of integration steps.
-        coll_check (bool): Whether to check for collisions or not.
+        bodies (Particles): The particles representing the planetary system.
+        tau_a_factor (float): Migration parameter in terms of the outer orbital period.
+        t_evol (float): Integration time in units of the outer orbital period.
+        n_steps (int): Number of steps for the integration.
     Returns:
-        bodies (Particles): The updated set of bodies in the system.
-    """  
-    planets = bodies[bodies.type == "planet"]
-    for pi in range(len(planets)-1):
+        Particles: The updated particles after creating the resonant chain.
+    """
+    for pi in range(len(bodies)-2):
         bodies = resonant_pair_planetary_system(
-                        bodies,
+                        bodies=bodies,
                         inner_planet_id=pi,
                         tau_a_factor=tau_a_factor,
-                        t_integration=t_integration,
-                        n_steps=n_steps,
-                        plot_results=False,
-                        coll_check=coll_check
+                        t_evol=t_evol,
+                        n_steps=n_steps
                         )
     return bodies
 
-def resonant_pair_planetary_system(bodies, inner_planet_id=0, outer_planet_id=1, tau_a_factor=-1e5,
-                                   t_integration=100, n_steps=100, plot_results=True, coll_check=False):
+def resonant_pair_planetary_system(bodies, inner_planet_id=0, outer_planet_id=1,
+                                   tau_a_factor=-1e5, t_evol=100, n_steps=100):
     """
-    Create a resonant pair of planetary bodies in a system.
+    Create a resonant pair of planets in a planetary system.
+    Assumes host to be most massive particle in the system, planets to be all other
+    massive particles.
     Args:
-        bodies (Particles): The set of bodies in the system.
+        bodies (Particles): The particles representing the planetary system.
         inner_planet_id (int): Index of the inner planet.
         outer_planet_id (int): Index of the outer planet.
-        tau_a_factor (float): Migration parameter in terms of outer orbital period.
-        t_integration (float): Integration time in units of the outer orbital period.
-        n_steps (int): Number of integration steps.
-        plot_results (bool): Whether to plot the results or not.
-        coll_check (bool): Whether to check for collisions or not.
-    Returns:
-        bodies (Particles): The updated set of bodies in the system.
+        tau_a_factor (float): Migration parameter in terms of the outer orbital period.
+        t_evol (float): Integration time in units of the outer orbital period.
+        n_steps (int): Number of steps for the integration.
     """
-
-    star = bodies[bodies.type == "star"][0]    
-    planets = bodies[bodies.type == "planet"]
-    print(f"Number of planets is {len(planets)}")
-    
+    star = bodies[bodies.mass.argmax()]
+    planets = bodies[bodies.type=="PLANET"]
     for pi in planets:
-        orbital_elements = orbital_elements_from_binary(star + pi)
-        pi.semimajor_axis = orbital_elements[2]
-        pi.eccentricity = orbital_elements[3]
-        pi.inclination = orbital_elements[5]
+        orbital_elements = orbital_elements(star + pi)
+        pi.sma = orbital_elements[2]
 
-    P1 = planets[inner_planet_id]
-    P2 = planets[outer_planet_id]
-    print(f"Resonance for {P1.name} and {P2.name}")
-    Porb_a = semi_to_orbital_period(P1.semimajor_axis, star.mass + P1.mass)
-    Porb_b = semi_to_orbital_period(P2.semimajor_axis, star.mass + P2.mass)
-    fraction = Fraction(Porb_a/Porb_b).limit_denominator(10)
-    print(f"{P1.name}, {P2.name} Orbital Period Ratio={fraction}, {fraction.numerator/fraction.denominator},  {Porb_a/Porb_b}")
+    planet_a = planets[inner_planet_id]
+    planet_b = planets[outer_planet_id]
+    Porb_a = semi_to_orbital_period(planet_a.sma, star.mass + planet_a.mass)[0]
+    Porb_b = semi_to_orbital_period(planet_b.sma, star.mass + planet_b.mass)[0]
+    if np.isnan(Porb_a.value_in(units.s)) or np.isnan(Porb_b.value_in(units.s)):
+        print("Ill-defined orbital periods, returning original bodies")
+        return bodies
     
     bring_planet_pair_in_resonance(
         planetary_system=bodies, 
-        inner_planet=P1, 
-        outer_planet=P2,
+        outer_planet=planet_b,
         tau_a_factor=tau_a_factor,
-        t_integration=t_integration, 
-        n_steps=n_steps,
-        plot_results=plot_results,
-        coll_check=coll_check
+        t_evol=t_evol, 
+        n_steps=n_steps
     )
-
     return bodies
 
 def new_option_parser():
     from amuse.units.optparse import OptionParser
     result = OptionParser()
     result.add_option("--inner", dest="inner_planet_id",
-                      type="int",
-                      default = 0,
+                      type="int", default = 0,
                       help="inner planet id [%default]")
     result.add_option("--outer", dest="outer_planet_id",
-                      type="int",
-                      default = 1,
+                      type="int", default = 1,
                       help="outer planet id [%default]")
     result.add_option("-f", dest="infilename", 
                       default = "input_filename.amuse",
@@ -102,37 +89,48 @@ def new_option_parser():
     result.add_option("--n_steps", dest="n_steps", 
                       default = 100, type="int",
                       help="number of steps [%default]")
-    result.add_option("--t_integration", dest="t_integration", 
+    result.add_option("--t_evol", dest="t_evol", 
                       default = 1000, type="float",
                       help="integration time in units of the outer orbital period [%default]")
-    result.add_option("--tau", 
-                      dest="tau_a_factor", type="float", 
-                      default = -1e5,
+    result.add_option("--tau", dest="tau_a_factor", 
+                      type="float", default = -1e5,
                       help="migration parameter (in terms of outer orbital period) [%default]")
     return result
     
 if __name__ in ('__main__', '__plot__'):
     o, arguments  = new_option_parser().parse_args()
 
-    bodies = read_set_from_file(o.infilename)
+    system = read_set_from_file("planetary_system.hdf5")
+    if len(system) < 3:
+        print(f"System has 1 planet, skipping")
+        exit(-1)
+    
+    host = system[system.mass.argmax()]
+    system = system.sorted_by_attribute("sma")
+    p = system - host
+    
+    
+    print(f"Original attributes:")
+    print(f"Masses: {system.mass}")
+    for pl in p:
+        ke = orbital_elements(pl + host, G=constants.G)
+        print(f"ecc={ke[3]}, ", end=" ") 
+        print(f"sma={ke[2].in_(units.au)}", end=" ")
+        print(f"inc={ke[5].in_(units.deg)}")
 
-    if o.inner_planet_id<0:
-        bodies = resonant_chain_planetary_system(bodies,
-                                                 o.tau_a_factor,
-                                                 o.t_integration, 
-                                                 o.n_steps)
-
-    else:
-        bodies = resonant_pair_planetary_system(bodies, 
-                                                o.inner_planet_id, 
-                                                o.outer_planet_id,
-                                                o.tau_a_factor,
-                                                o.t_integration, 
-                                                o.n_steps)
-    write_set_to_file(
-        bodies,
-        o.outfilename,
-        overwrite_file=True,
-        append_to_file=False,
-        close_file=True
-    )
+    system = resonant_chain_planetary_system(system, o.tau_a_factor, o.t_evol, o.n_steps)
+    host = system[system.mass.argmax()]
+    p = system - host
+    print(f"After shaking:")
+    print(f"Masses: {system.mass}")
+    for pl in p:
+        ke = orbital_elements(pl + host, G=constants.G)
+        print(f"ecc={ke[3]}, ", end=" ") 
+        print(f"sma={ke[2].in_(units.au)}", end=" ")
+        print(f"inc={ke[5].in_(units.deg)}")
+        
+    if np.isnan(host.x.value_in(units.pc)):
+        print("!!! Task unsuccessful: Resonance not found. !!!")
+        exit(-1)
+    
+    write_set_to_file(system, o.outfilename, "hdf5", append_to_file=False)

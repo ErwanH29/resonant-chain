@@ -1,40 +1,40 @@
 #!/usr/bin/env python
 
-from amuse.community.ph4.interface import ph4
-from amuse.ext.basicgraph import UnionFind
-from amuse.units import units, constants, nbody_system, quantities
-from amuse.lab import Particles, Particle
-from amuse.couple import bridge
-from amuse.ext.orbital_elements import new_binary_from_orbital_elements, orbital_elements_from_binary
 
 from tqdm import tqdm
 import numpy as np
-from amuse.io import write_set_to_file, read_set_from_file
 
-import matplotlib.pyplot as plt
+from amuse.community.ph4.interface import ph4
+from amuse.couple import bridge
+from amuse.ext.basicgraph import UnionFind
+from amuse.ext.orbital_elements import new_binary_from_orbital_elements, orbital_elements_from_binary
+from amuse.io import write_set_to_file, read_set_from_file
+from amuse.lab import Particles, Particle
+from amuse.units import units, constants, nbody_system, quantities
 
 
 STAR_MASS = 0.08 | units.MSun
 
-def semi_to_orbital_period(a, Mtot) :
+
+def semi_to_orbital_period(a, Mtot):
     """
-    Calculate the orbital period from the semi-major axis and total mass.
+    Get orbital period from semi-major axis and total mass.
     Args:
-        a (units.length): Semi-major axis in units of length.
-        Mtot (units.mass): Total mass of the system in units of mass.
+        a (units.length): Semi-major axis of the orbit.
+        Mtot (units.mass): Total mass of the system (star + planet).
     Returns:
-        units.time: Orbital period in units of time.
+        P (units.time): Orbital period of the system.
     """
     return 2*np.pi * (a**3/(constants.G*Mtot)).sqrt()
 
-def orbital_period_to_semi(P, Mtot) :
+def orbital_period_to_semi(P, Mtot):
     """
-    Calculate the semi-major axis from the orbital period and total mass.
+    Get semi-major axis from orbital period and total mass.
     Args:
-        P (units.time): Orbital period in units of time.
-        Mtot (units.mass): Total mass of the system in units of mass.
+        P (units.time): Orbital period of the system.
+        Mtot (units.mass): Total mass of the system (star + planet).
     Returns:
-        units.length: Semi-major axis in units of length.
+        a (units.length): Semi-major axis of the orbit.
     """
     return ((constants.G*Mtot) * (P/(2*np.pi))**2)**(1./3.)
 
@@ -89,10 +89,9 @@ def planet_radius(planet_mass) -> units.REarth:
     elif mass_in_earth < 125:
         return (0.55 | units.REarth)*(mass_in_earth)**0.65
     return (14.3 | units.REarth)*(mass_in_earth)**(-0.02) 
-    
 
 class CodeWithMigration():
-    # not elegant: 1. need the additional input of particles. 2. need additional asignment of timestep
+    """Class to shake systems into resonance. Includes migration and damping."""
     def __init__(self, code, particles, do_sync=True, verbose=False):
         self.code = code
         if hasattr(self.code, 'model_time'):
@@ -109,17 +108,18 @@ class CodeWithMigration():
             ]
         self.required_attributes = lambda p, x : x in required_attributes
         self.particles = particles
+        self.grav_to_framework = self.code.particles.new_channel_to(self.particles)
         
     def kick_with_field_code(self, particles, dt):
         """
         Apply the kick to the particles using the field code.
-        
         Args:
             particles (Particles): The particles to update.
             dt (units.time): The time step for the kick.
         """
         star = particles[particles.mass.argmax()]
-        if len(particles.mass > STAR_MASS) > 1:
+        stars = particles[particles.mass > STAR_MASS]
+        if len(stars) > 1:
             raise Exception("More than one star in the planetary system, cannot continue.")
         
         planets = particles - star
@@ -132,9 +132,9 @@ class CodeWithMigration():
         dz  = planets.z  - star.z
         r2  = dx*dx + dy*dy + dz*dz
         
-        ax  = dvx * (0 | units.s)**-1
-        ay  = dvy * (0 | units.s)**-1
-        az  = dvz * (0 | units.s)**-1
+        ax  = 0.*dvx * (1 | units.s)**-1
+        ay  = 0.*dvy * (1 | units.s)**-1
+        az  = 0.*dvz * (1 | units.s)**-1
         
         # Migration
         if hasattr(planets, 'tau_a'):
@@ -172,13 +172,11 @@ class CodeWithMigration():
         Args:
             tend (units.time): The end time to evolve the model to.
         """
-        ### Require new channels every step?
         timestep = self.timestep
         while self.time < tend:
             dt = min(timestep, tend-self.time)
-            codetopart = self.code.particles.new_channel_to(self.particles)
-            codetopart.copy()
-            parts = self.particles.copy(filter_attributes = self.required_attributes)
+            self.grav_to_framework.copy()
+            parts = self.particles.copy(filter_attributes=self.required_attributes)
             self.kick_with_field_code(parts, dt)
             copytopart = parts.new_channel_to(
                             self.particles, 
@@ -195,17 +193,25 @@ class CodeWithMigration():
             self.time+=timestep
         self.time = tend
 
-def bring_planet_pair_in_resonance(planetary_system, 
-                                   inner_planet, 
-                                   outer_planet,
-                                   tau_a_factor = -1.e5,
-                                   t_integration=100, 
-                                   n_steps=100,
-                                   plot_results=False,
-                                   coll_check=False):
-    
-    star = planetary_system[planetary_system.mass >= STAR_MASS][0]    
-    planets = planetary_system[planetary_system.mass < STAR_MASS]
+def bring_planet_pair_in_resonance(planetary_system, outer_planet,
+                                   tau_a_factor=-1.e5, t_evol=100, 
+                                   n_steps=100, coll_check=True):
+    """
+    Shake a pair of planets into resonance using direct N-body integration.
+    Assumes host to be most massive particle in the system, planets to be all other
+    massive particles.
+    Args:
+        planetary_system (Particles): The particles representing the planetary system.
+        outer_planet (Particle): The outer planet in the pair.
+        tau_a_factor (float): Migration parameter in terms of the outer orbital period.
+        t_evol (float): Integration time in units of the outer orbital period.
+        n_steps (int): Number of steps for the integration.
+        coll_check (bool): Whether to check for collisions during the integration.
+    Returns:
+        Particles: The updated particles after creating the resonant pair.
+    """
+    star = planetary_system[planetary_system.mass.argmax()]
+    planets = planetary_system[planetary_system.mass > 0. | units.MSun] - star
     first_planet = planets[0]
     last_planet = planets[1]
     orbital_elements = orbital_elements_from_binary(star+planets[-1])
@@ -219,20 +225,25 @@ def bring_planet_pair_in_resonance(planetary_system,
 
     converter = nbody_system.nbody_to_si(planetary_system.mass.sum(), Porbit)
     nbody = ph4(convert_nbody=converter)
+    nbody.parameters.timestep_parameter = 0.01
     nbody.particles.add_particles(planetary_system)
     if coll_check:
-        particles = nbody.particles
-        star_mask = particles.mass > STAR_MASS
+        p = nbody.particles
+        star_mask = p.mass > STAR_MASS
+        p[star_mask].radius = ZAMS_radius(p[star_mask].mass)
+        for planet in p[~star_mask]:
+            planet.radius = planet_radius(planet.mass)
         
-        particles[star_mask].radius = ZAMS_radius(particles[star_mask].mass)
-        particles[~star_mask].radius = planet_radius(particles[~star_mask].mass)
-        
-        nbody.parameters.epsilon_squared = (0.01*Porbit)**2
         coll_sc = nbody.stopping_conditions.collision_detection
         coll_sc.enable()
 
     #setup nbody
-    migration_code = CodeWithMigration(nbody, planetary_system, do_sync=True, verbose=False)
+    migration_code = CodeWithMigration(
+                        nbody, 
+                        planetary_system, 
+                        do_sync=True, 
+                        verbose=False
+                        )
     planet_migration = bridge.Bridge(use_threading=False)
     planet_migration.add_system(nbody)
     planet_migration.add_code(migration_code)
@@ -252,8 +263,8 @@ def bring_planet_pair_in_resonance(planetary_system,
     e2 = np.zeros(N)
     ele1 = []
     ele2 = []
-    ts = np.linspace(1, t_integration, N) * Porbit
-
+    ts = np.linspace(1, t_evol, N) * Porbit
+    
     channel_from_system_to_framework = nbody.particles.new_channel_to(planetary_system)
     for i,t in enumerate(tqdm(ts)):
         planet_migration.evolve_model(t)
@@ -276,8 +287,9 @@ def bring_planet_pair_in_resonance(planetary_system,
         orbit_a = orbital_elements_from_binary(star + first_planet)
         orbit_b = orbital_elements_from_binary(star + last_planet)
         
-        a1[i], e1[i]=orbit_a[2], orbit_a[3]
-        a2[i], e2[i]=orbit_b[2], orbit_b[3]
+        a1[i], e1[i] = orbit_a[2], orbit_a[3]
+        a2[i], e2[i] = orbit_b[2], orbit_b[3]
+
         ele1.append(orbit_a)
         ele2.append(orbit_b)
         
@@ -315,66 +327,31 @@ def bring_planet_pair_in_resonance(planetary_system,
         phi_a.append(p_a)
         phi_b.append(p_b)
 
-    if plot_results:
-        phi_a = np.array(phi_a).T
-        phi_b = np.array(phi_b).T
-        
-        Porb = np.array(Porb).T
-        sma = np.array(sma).T
-        ecc = np.array(ecc).T
-        inc = np.array(inc).T
-    
-        for ai in sma[:]:
-            plt.plot(ts.value_in(units.yr), ai, lw=3)
-        #plt.axhline(y=20.8, linestyle='-', lw=1)
-        plt.xlabel('Time[yr]')
-        plt.ylabel('a [au]')
-        plt.show()
-
-        for Pi in Porb[:]:
-            plt.plot(ts.value_in(units.yr), Pi, lw=3)
-        #plt.axhline(y=20.8, linestyle='-', lw=1)
-        plt.xlabel('Time[yr]')
-        plt.ylabel('P [yr]')
-        plt.show()
-    
-        for ei in ecc[:]:
-            plt.plot(ts.value_in(units.yr), ei)
-        plt.xlabel('Time[yr]')
-        plt.ylabel('e')
-        plt.show()
-
-        for ii in inc[:]:
-            plt.plot(ts.value_in(units.yr), ii)
-        plt.xlabel('Time[yr]')
-        plt.ylabel('i [deg]')
-        plt.show()
-
-        for pi in phi_a[:]:
-            plt.scatter(ts.value_in(units.yr), pi%(360))
-        for pi in phi_b[:]:
-            plt.scatter(ts.value_in(units.yr), pi%(360))
-        plt.xlabel('Time[yr]')
-        plt.ylabel('phi [deg]')
-        plt.show()
-
-        for pi in range(len(phi_a[:])):
-            plt.scatter(phi_a[pi]%(360), phi_b[pi]%(360))
-        plt.xlabel('phi a [deg]')
-        plt.ylabel('phi b [deg]')
-        plt.show()
-
     return planetary_system
     
 def add_planet_in_resonant_chain(bodies, name_star, semimajor_axis,
-                                 eccentricity,
-                                 inclination, mplanet, Pratio=0, name="Aa",
-                                 tau_a_factor=-1e5,
-                                 t_integration=100,
-                                 n_steps=100):
-
-    star = bodies[bodies.mass >= STAR_MASS][0]    
-    planets = bodies[bodies.mass < STAR_MASS]
+                                 eccentricity, inclination, mplanet, 
+                                 Pratio=0, name="Aa", tau_a_factor=-1e5,
+                                 t_evol=100, n_steps=100):
+    """
+    Add a planet to a planetary system in a resonant chain.
+    Args:
+        bodies (Particles): The particles representing the planetary system.
+        name_star (str): Name of the star.
+        semimajor_axis (units.length): Semi-major axis of the first planet.
+        eccentricity (float): Eccentricity of the first planet.
+        inclination (units.angle): Inclination of the orbit.
+        mplanet (units.mass): Mass of the planet to be added.
+        Pratio (float): Resonant period ratio for the outer planet.
+        name (str): Name of the planet to be added.
+        tau_a_factor (float): Migration parameter in terms of the outer orbital period.
+        t_evol (float): Integration time in units of the outer orbital period.
+        n_steps (int): Number of steps for the integration.
+    Returns:
+        Particles: The updated particles after adding the planet in resonance.
+    """
+    star = bodies[bodies.mass.argmax()]
+    planets = bodies[bodies.mass > 0. | units.MSun] - star
     if len(planets) == 0:
         print(f"add planet to star")
         bodies = new_binary_from_orbital_elements(star.mass,
@@ -393,23 +370,26 @@ def add_planet_in_resonant_chain(bodies, name_star, semimajor_axis,
     orbital_elements = orbital_elements_from_binary(star+last_planet)
     Porbit = semi_to_orbital_period(orbital_elements[2], np.sum(orbital_elements[:2]))
     print(f"outer orbital period: {Porbit.in_(units.yr)}")
-
     if Pratio>0:
         Pouter = Pratio*Porbit
         semimajor_axis = orbital_period_to_semi(Pouter, bodies.mass.sum())
     
-    second_planet = new_binary_from_orbital_elements(bodies.mass.sum(),
-                                                     mplanet, semimajor_axis, 0,
-                                                     inclination=inclination)
+    second_planet = new_binary_from_orbital_elements(
+                            mass1=bodies.mass.sum(),
+                            mass2=mplanet, 
+                            semimajor_axis=semimajor_axis, 
+                            eccentricity=0,
+                            inclination=inclination
+                            )
 
     bodies.add_particle(second_planet[1])
     bodies[-1].type = "planet"
     bodies[-1].name = name
     bodies.move_to_center()
 
-    bodies = bring_planet_pair_in_resonance(bodies, bodies[-2], bodies[-1],
+    bodies = bring_planet_pair_in_resonance(bodies, bodies[-1],
                                             tau_a_factor=tau_a_factor,
-                                            t_integration=t_integration,
+                                            t_evol=t_evol,
                                             n_steps=n_steps)
 
     return bodies
@@ -440,8 +420,8 @@ def new_option_parser():
                       dest="tau_a_factor", type="float", 
                       default = -1e5,
                       help="migration parameter (in terms of outer orbital period) [%default]")
-    result.add_option("-t", "--t_integration", 
-                      dest="t_integration", type="float", 
+    result.add_option("-t", "--t_evol", 
+                      dest="t_evol", type="float", 
                       default = 100,
                       help="migration time scale (in terms of outer orbital period) [%default]")
     result.add_option("--nsteps", 
@@ -479,10 +459,12 @@ if __name__ in ('__main__', '__plot__'):
                                           o.eccentricity,
                                           o.inclination, o.mplanet, o.Pratio, o.name,
                                           o.tau_a_factor,
-                                          o.t_integration,
+                                          o.t_evol,
                                           o.n_steps)
     write_set_to_file(bodies,
                       o.infilename,
                       overwrite_file=True,
                       append_to_file=False,
                       close_file=True)
+
+
