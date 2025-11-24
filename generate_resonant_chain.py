@@ -330,7 +330,7 @@ def bring_planet_pair_in_resonance(planetary_system, outer_planet,
     return planetary_system
     
 def add_planet_in_resonant_chain(bodies, name_star, semimajor_axis,
-                                 eccentricity, inclination, mplanet, 
+                                 eccentricity, inclination, mplanet, rplanet,
                                  Pratio=0, name="Aa", tau_a_factor=-1e5,
                                  t_evol=100, n_steps=100):
     """
@@ -369,7 +369,8 @@ def add_planet_in_resonant_chain(bodies, name_star, semimajor_axis,
     last_planet = planets[-1]
     orbital_elements = orbital_elements_from_binary(star+last_planet)
     Porbit = semi_to_orbital_period(orbital_elements[2], np.sum(orbital_elements[:2]))
-    print(f"outer orbital period: {Porbit.in_(units.yr)}")
+    sma = orbital_period_to_semi(Porbit, star.mass+planets.mass.sum())
+    print(f"outer orbital period: {Porbit.in_(units.yr)}, a={sma.in_(units.au)}")
     if Pratio>0:
         Pouter = Pratio*Porbit
         semimajor_axis = orbital_period_to_semi(Pouter, bodies.mass.sum())
@@ -412,10 +413,18 @@ def new_option_parser():
     result.add_option("-i", dest="inclination", type="float", unit=units.deg,
                       default = 1|units.deg,
                       help="semi-major axis of the first planet [%default]")
-    result.add_option("-P", "--Period_ratio",
-                      dest="Pratio", type="float", 
+    result.add_option("--P", 
+                      dest="period", type="float", 
                       default = 0,
-                      help="Resonant period ratio [%default]")
+                      help="outer orbital period [%default]")
+    result.add_option("--Pnom", 
+                      dest="Pnominator", type="int", 
+                      default = 0,
+                      help="nominator period ratio [%default]")
+    result.add_option("--Pdenom", 
+                      dest="Pdenominator", type="int", 
+                      default = 0,
+                      help="denominator period ratio [%default]")
     result.add_option("--tau", 
                       dest="tau_a_factor", type="float", 
                       default = -1e5,
@@ -431,6 +440,9 @@ def new_option_parser():
     result.add_option("-m", dest="mplanet", type="float", unit=units.MEarth,
                       default = 1|units.MEarth,
                       help="mass of the planet planet [%default]")
+    result.add_option("-r", dest="rplanet", type="float", unit=units.REarth,
+                      default = 1|units.REarth,
+                      help="mass of the planet planet [%default]")
     result.add_option("--name", dest="name", 
                       default = "planet",
                       help="planet name [%default]")
@@ -445,8 +457,13 @@ def new_option_parser():
 if __name__ in ('__main__', '__plot__'):
     o, arguments  = new_option_parser().parse_args()
 
+    Pratio = -1
     if o.Mstar<=0|units.MSun:
         bodies = read_set_from_file(o.infilename)
+        if o.Pdenominator>0:
+            Pratio = o.Pnominator/o.Pdenominator
+        else:
+            Pratio = o.period
     else:
         bodies = Particles(1)
         bodies.type = "star"
@@ -457,7 +474,8 @@ if __name__ in ('__main__', '__plot__'):
                                           o.name_star,
                                           o.semimajor_axis,
                                           o.eccentricity,
-                                          o.inclination, o.mplanet, o.Pratio, o.name,
+                                          o.inclination, o.mplanet, o.rplanet,
+                                          Pratio, o.name,
                                           o.tau_a_factor,
                                           o.t_evol,
                                           o.n_steps)
